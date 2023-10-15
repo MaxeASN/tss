@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/bnb-chain/tss/cmd"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+
+	"github.com/bnb-chain/tss/cmd/tss-tool/commands"
 )
 
 func main() {
@@ -12,5 +13,5 @@ func main() {
 		log.Println(http.ListenAndServe("localhost:6062", nil))
 	}()
 
-	cmd.Execute()
+	commands.Execute()
 }
