@@ -63,6 +63,7 @@ func mainImpl() int {
 	newWorker := worker.NewWorker(ctx, workerConfig)
 	newWorker.Start()
 	//go func() {
+	abortChan := make(chan os.Signal, 1)
 	signal.Notify(abortChan, os.Interrupt)
 	sig := <-abortChan
 	log.Printf("\n----------------  Got signal: %v  ---------------- \n", sig)
