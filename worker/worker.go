@@ -16,6 +16,9 @@ type Worker struct {
 	// lock protects access
 	lock sync.RWMutex
 
+	// waitgroup to wait for all workers to finish
+	wg sync.WaitGroup
+
 	// quit is used to stop the worker
 	quit chan struct{}
 
@@ -119,6 +122,7 @@ func (w *Worker) Start() {
 					log.Info("get task error", "error", err)
 					continue
 				} else {
+				w.wg.Add(1)
 					// decode task
 					task := next.(*TaskEvent)
 					// try to get subworker
@@ -128,6 +132,7 @@ func (w *Worker) Start() {
 					// return the subworker to the worker pool
 					w.workers <- subWorker
 				}
+					w.wg.Done()
 			}
 		}
 	}()
@@ -155,6 +160,9 @@ func (w *Worker) Stop() {
 	// close the queue
 	log.Info("Waiting for queue to exit...")
 	w.queue.Close()
+
+	// wait for the subworkers to finish
+	w.wg.Wait()
 
 	// stop the worker itself
 	close(w.quit)
