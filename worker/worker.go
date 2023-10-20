@@ -16,6 +16,9 @@ type Worker struct {
 	// lock protects access
 	lock sync.RWMutex
 
+	// waitgroup to wait for all workers to finish
+	wg sync.WaitGroup
+
 	// quit is used to stop the worker
 	quit chan struct{}
 
@@ -24,6 +27,9 @@ type Worker struct {
 
 	// workers is used to reuse the subworker
 	workers chan *SubWorker
+
+	// subworker is the worker index of the task
+	subWorkerIndex map[string]*SubWorker
 
 	// workerLen is the number of subworkers
 	// workerLen int
@@ -96,10 +102,11 @@ func NewWorker(ctx context.Context, cfg *WorkerConfig) *Worker {
 	log.Info("Starting subworkers", "len", cfg.WorkerLimit)
 	// new Worker
 	return &Worker{
-		config:  cfg,
-		quit:    make(chan struct{}),
-		queue:   NewTaskQueue(),
-		workers: workers,
+		config:         cfg,
+		quit:           make(chan struct{}),
+		queue:          NewTaskQueue(),
+		workers:        workers,
+		subWorkerIndex: make(map[string]*SubWorker),
 	}
 }
 
@@ -115,26 +122,47 @@ func (w *Worker) Start() {
 			case <-time.After(time.Second * 1):
 				fmt.Println("Goroutine number: ", runtime.NumGoroutine())
 			default:
-				if next, err := w.queue.Next(); err != nil {
+				next, err := w.queue.Next()
+				if err != nil {
 					log.Info("get task error", "error", err)
 					continue
-				} else {
+				}
+				w.wg.Add(1)
+				go func() {
 					// decode task
 					task := next.(*TaskEvent)
 					// try to get subworker
-					subWorker := <-w.workers
+					//subWorker := <-w.workers
+					subWorker := w.subWorkerIndex[task.Tid]
 					// try to process the task
 					subWorker.process(task)
 					// return the subworker to the worker pool
 					w.workers <- subWorker
-				}
+					delete(w.subWorkerIndex, task.Tid)
+					w.wg.Done()
+				}()
 			}
 		}
 	}()
 }
 
-func (w *Worker) PushEvent(event *TaskEvent) error {
-	return w.queue.Add(event)
+func (w *Worker) PushEvent(event *TaskEvent) (chan TaskResult, error) {
+
+	subWorker := <-w.workers
+	w.subWorkerIndex[event.Tid] = subWorker
+	log.Info("Get subworker", "name", subWorker.name)
+
+	if err := w.queue.Add(event); err != nil {
+		return nil, err
+	}
+	return subWorker.ch, nil
+}
+
+func (w *Worker) ReleaseWorker(tid string) {
+	subworker := w.subWorkerIndex[tid]
+	w.workers <- subworker
+	delete(w.subWorkerIndex, tid)
+	log.Info("!!! Release subworker", "name", subworker.name, "task_id", tid)
 }
 
 func (w *Worker) Stop() {
@@ -156,6 +184,9 @@ func (w *Worker) Stop() {
 	log.Info("Waiting for queue to exit...")
 	w.queue.Close()
 
+	// wait for the subworkers to finish
+	w.wg.Wait()
+
 	// stop the worker itself
 	close(w.quit)
 }
@@ -168,5 +199,10 @@ func (sw *SubWorker) process(task *TaskEvent) {
 	default:
 		log.Info("Processing task", "id", task.Tid)
 		time.Sleep(time.Second * 2)
+		sw.ch <- TaskResult{
+			Err:    nil,
+			Tid:    task.Tid,
+			Result: "ok",
+		}
 	}
 }
