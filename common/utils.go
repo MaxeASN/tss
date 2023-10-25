@@ -11,6 +11,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/ipfs/go-log"
+	"github.com/mattn/go-isatty"
 	"io"
 	"math"
 	"os"
@@ -18,10 +20,6 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"time"
-
-	"github.com/ipfs/go-log"
-	"github.com/mattn/go-isatty"
 )
 
 var logger = log.Logger("common")
@@ -104,10 +102,10 @@ func Decrypt(ciphertext []byte, channelId, passphrase string) (param *PeerParam,
 		error = fmt.Errorf("wrong channel id of message")
 		return
 	}
-	epochSeconds := ConvertHexToTimestamp(channelId[3:])
-	if time.Now().Unix() > int64(epochSeconds) {
-		Panic(fmt.Errorf("channel id has been expired, please regenerate a new one"))
-	}
+	//epochSeconds := ConvertHexToTimestamp(channelId[3:])
+	//if time.Now().Unix() > int64(epochSeconds) {
+	//	Panic(fmt.Errorf("channel id has been expired, please regenerate a new one"))
+	//}
 	return param, nil
 }
 
