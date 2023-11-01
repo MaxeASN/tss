@@ -3,7 +3,9 @@ package node
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"github.com/bnb-chain/tss/client"
 	"github.com/bnb-chain/tss/ssdp"
 	"net"
 	"os"
@@ -23,7 +25,7 @@ type Node struct {
 	TssCfg *common.TssConfig
 	P2pCfg *common.P2PConfig
 
-	bootsraper *common.Bootstrapper
+	bootstrapper *common.Bootstrapper
 }
 
 func New(cfg *common.TssConfig, isBootstraper bool) *Node {
@@ -37,7 +39,7 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 	}
 	// get listening addresses
 	listenAddresses := getListenAddrs(common.TssCfg.ListenAddr)
-	log.Info("Node listening addresses", "addresses", listenAddresses)
+	client.Logger.Debugf("This node is listening on: %v", listenAddresses)
 
 	// channel id and password
 	setChannelId()
@@ -48,7 +50,7 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 
 	// generate new bootstrapper
 	// notice: bootstrapper is used to find the peers using ssdp service
-	node.bootsraper = common.NewBootstrapper(numOfPeers, cfg)
+	node.bootstrapper = common.NewBootstrapper(numOfPeers, cfg)
 
 	// generate new ssdp protocol listener
 	ssdpListener, err := net.Listen("tcp", src)
@@ -60,60 +62,59 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 		if err != nil {
 			common.Panic(err)
 		}
+		client.Logger.Info("closed ssdp listener")
 	}()
+
+	//done := make(chan bool)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	// accept incoming connections
 	go func(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
+				ssdpListener.Close()
 				return
 			default:
-				log.Info("Waiting for incoming connections...")
+				client.Logger.Info("Waiting for incoming connections", "localAddr", ssdpListener.Addr().String())
 				conn, err := ssdpListener.Accept()
 				if err != nil {
-					log.Error("ssdp listener accept error", "err", err)
+					client.Logger.Error("ssdp listener accept error", "err", err)
 					continue
 				}
-				log.Info("ssdp listener accept new connection", "remote", conn.RemoteAddr().String())
 
 				// notice: this will store new peers
-				handleConn(conn, node.bootsraper)
+				handleConn(conn, node.bootstrapper)
 			}
 		}
 	}(ctx)
 
 	// peer discovery
-	log.Info("Finding peer via ssdp, Searching ...", "listenAddresses", listenAddresses, "numOfPeers", numOfPeers)
+	client.Logger.Info("Finding peer via ssdp, Searching ...", "listenAddresses", listenAddresses, "numOfPeers", numOfPeers)
 	newPeerAddresses := findPeerAddrsViaSsdp(numOfPeers, listenAddresses)
 	done := make(chan bool, 1)
 
-	log.Info("Find peer via ssdp ...", "peers", newPeerAddresses)
+	client.Logger.Debug("Find peer via ssdp ...", "peers", newPeerAddresses)
 
 	go func() {
 		for _, peer := range newPeerAddresses {
-			log.Info("Found new Node Peer address", "address", peer)
 			go func(peer string) {
 				dest, err := common.ConvertMultiAddrStrToNormalAddr(peer)
 				if err != nil {
 					common.Panic(err)
 				}
 				// trying to connect to the new peer
-				log.Debug("Trying to connect to Node", "remote", dest)
 				conn, err := net.Dial("tcp", dest)
 				if conn == nil || err != nil {
 					common.Panic(err)
 				}
-				//
-				log.Info("Connected to Node", "remote", dest)
-				//
-				handleConn(conn, node.bootsraper)
+				//defer conn.Close()
+				handleConn(conn, node.bootstrapper)
 			}(peer)
 		}
 		// check peer infos, check if we have the enough connected peers
 		for {
-			log.Info(">>>>>>>>>>>>>>>>>>>>>>>")
-			if node.bootsraper.IsFinished() {
+			if node.bootstrapper.IsFinished() {
 				cancel()
 				done <- true
 				break
@@ -123,16 +124,30 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 		}
 	}()
 
-	log.Info("Waiting here ...")
 	// waiting here
 	<-done
 
-	node.bootsraper.Peers.Range(func(id, value interface{}) bool {
-		log.Info("Running New Peer", "address", value.(common.PeerInfo).RemoteAddr)
+	node.bootstrapper.Peers.Range(func(id, value interface{}) bool {
+		client.Logger.Debugf("Running New Peer", "address", value.(common.PeerInfo).RemoteAddr)
 		return true
 	})
 
+	// update peer info to the bootstrapper
+	updatePeerInfo(node.bootstrapper)
+
 	return node
+}
+
+func (n *Node) Start(ctx context.Context) {
+	//for {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+		c := client.NewTssClient(&common.TssCfg, client.KeygenMode, false)
+		c.Start()
+	}
+	//}
 }
 
 func findPeerAddrsViaSsdp(peers int, addresses string) []string {
@@ -145,9 +160,6 @@ func findPeerAddrsViaSsdp(peers int, addresses string) []string {
 		}
 		return true
 	})
-	for _, peer := range collectedPeers {
-		fmt.Println(">>>>>>>>>>>>>>> ", peer)
-	}
 	return collectedPeers
 }
 
@@ -167,6 +179,7 @@ func getListenAddrs(addr string) string {
 		}
 		fmt.Fprintf(&builder, "%s", addr.String())
 	}
+	hosts.Close()
 	return builder.String()
 }
 
@@ -205,54 +218,134 @@ func handleConn(conn net.Conn, bootsraper *common.Bootstrapper) {
 	log.Debug("handle new connection", "remote", conn.RemoteAddr().String())
 
 	// send bootstrap message
-	n := sendBootstrapMessage(conn, bootsraper.Msg)
+	sendBootstrapMessage(conn, bootsraper.Msg)
 	// read bootstrap message
-	readBootstrapMessage(conn, bootsraper, n)
+	readBootstrapMessage(conn, bootsraper)
 }
 
-func sendBootstrapMessage(conn net.Conn, msg *common.BootstrapMessage) int {
+func sendBootstrapMessage(conn net.Conn, msg *common.BootstrapMessage) {
+
 	realIP := strings.SplitN(conn.LocalAddr().String(), ":", 2)[0]
 	connMsg := &common.BootstrapMessage{
-		ChannelId: common.TssCfg.ChannelId,
+		ChannelId: msg.ChannelId,
 		PeerInfo:  msg.PeerInfo,
 		Addr:      common.ReplaceIpInAddr(msg.Addr, realIP),
 	}
 	payload, err := proto.Marshal(connMsg)
 	if err != nil {
-		log.Error("marshal bootstrap message error", "err", err)
-		return 0
+		client.Logger.Error("marshal bootstrap message error", "err", err)
+		return
+	}
+
+	messageLength := int32(len(payload))
+	err = binary.Write(conn, binary.BigEndian, &messageLength)
+	if err != nil {
+		common.SkipTcpClosePanic(fmt.Errorf("failed to write bootstrap message length: %v", err))
+		return
 	}
 
 	n, err := conn.Write(payload)
 	if n != len(payload) {
-		log.Error("write bootstrap message error", "err", err)
-		return 0
+		client.Logger.Error("write bootstrap message error", "err", err)
+		return
 	}
-
-	// write bootstrap message successfully
-	log.Info(">>>>>>> write bytes", "payload", payload)
-	log.Info("Write bootstrap message successfully", "remote", conn.RemoteAddr().String(), "length", n)
-	return n
+	return
 }
 
-func readBootstrapMessage(conn net.Conn, bootstraper *common.Bootstrapper, l int) {
-	payload := make([]byte, l)
-	n, err := conn.Read(payload)
-	if err != nil || n != l {
-		log.Error("read bootstrap message error", "err", err)
+func readBootstrapMessage(conn net.Conn, bootstrapper *common.Bootstrapper) {
+	var messageLength int32
+	err := binary.Read(conn, binary.BigEndian, &messageLength)
+	if err != nil {
+		common.SkipTcpClosePanic(fmt.Errorf("failed to read bootstrap message length: %v", err))
 		return
 	}
 
+	//log.Info("!!!!!!!!!!!!! READ bootstrap message length !!!!!!!!!!!!!", "messageLength", messageLength)
+
+	payload := make([]byte, messageLength)
+	n, err := conn.Read(payload)
+	//n, err := io.ReadFull(conn, payload)
+	if int32(n) != messageLength {
+		client.Logger.Error("read bootstrap message length error", "err", err, "read", n, "length", messageLength, "from", conn.RemoteAddr().String())
+	}
+	if err != nil {
+		client.Logger.Error("read bootstrap message error", "err", err, "from", conn.RemoteAddr().String())
+		return
+	}
 	// unmarshal bootstrap message
 	var peerMsg common.BootstrapMessage
 	err = proto.Unmarshal(payload, &peerMsg)
 	if err != nil {
-		log.Error("unmarshal bootstrap message error", "err", err)
+		client.Logger.Error("unmarshal bootstrap message error", "err", err, "payload", payload)
 		return
 	}
 
-	if err = bootstraper.HandleBootstrapMsg(peerMsg); err != nil {
-		log.Error("handle bootstrap message error", "err", err)
+	if err = bootstrapper.HandleBootstrapMsg(peerMsg); err != nil {
+		client.Logger.Error("handle bootstrap message error", "err", err)
 	}
-	log.Info("Read bootstrap message successfully", "remote", conn.RemoteAddr().String())
+	client.Logger.Info("Read bootstrap message successfully", "remote", conn.RemoteAddr().String())
+}
+
+func updatePeerInfo(bootstrapper *common.Bootstrapper) {
+	peerAddrs := make([]string, 0)
+	expectedPeerAddrs := make([]string, 0)
+
+	newPeerAddrs := make([]string, 0)
+	newExpectedPeerAddrs := make([]string, 0)
+
+	bootstrapper.Peers.Range(func(id, value any) bool {
+		if p, ok := value.(common.PeerInfo); ok {
+			client.Logger.Debugf("Trying to update peer info", "address", p.RemoteAddr)
+			// if not regroup mode
+			if common.TssCfg.BMode != common.PreRegroupMode {
+				peerAddrs = append(peerAddrs, p.RemoteAddr)
+				expectedPeerAddrs = append(expectedPeerAddrs, fmt.Sprintf("%s@%s", p.Moniker, p.Id))
+				// update common.TssCfg
+				common.TssCfg.PeerAddrs, common.TssCfg.ExpectedPeers = mergePeerInfo(
+					common.TssCfg.PeerAddrs,
+					common.TssCfg.ExpectedPeers,
+					peerAddrs,
+					expectedPeerAddrs,
+				)
+
+			} else {
+				newPeerAddrs = append(newPeerAddrs, p.RemoteAddr)
+				newExpectedPeerAddrs = append(newExpectedPeerAddrs, fmt.Sprintf("%s@%s", p.Moniker, p.RemoteAddr))
+				// update common.TssCfg
+				common.TssCfg.NewPeerAddrs, common.TssCfg.ExpectedNewPeers = mergePeerInfo(
+					common.TssCfg.NewPeerAddrs,
+					common.TssCfg.ExpectedNewPeers,
+					newPeerAddrs,
+					newExpectedPeerAddrs,
+				)
+			}
+			return true
+		} else {
+			client.Logger.Errorf("Failed to update peer info, address: %s", p.RemoteAddr, "Peer info is not of type %T", value)
+			return false
+		}
+	})
+
+	// log
+	client.Logger.Debugf("Bootstrapper Peer Length: %d. Expected Peer Length: %d", len(peerAddrs), len(expectedPeerAddrs))
+}
+
+func mergePeerInfo(currentPeerAddrs, currentExpectedPeers, newPeerAddrs, newExpectedPeers []string) ([]string, []string) {
+	needMerge := make(map[string]string) // map of expected peer addrs -> peer addrs
+	//
+	for i, p := range currentExpectedPeers {
+		needMerge[p] = currentPeerAddrs[i]
+	}
+	for i, p := range newExpectedPeers {
+		needMerge[p] = newPeerAddrs[i]
+	}
+	// cache
+	updatedPeers := make([]string, 0)
+	updatedPeerAddrs := make([]string, 0)
+	// merge
+	for p, addr := range needMerge {
+		updatedPeers = append(updatedPeers, p)
+		updatedPeerAddrs = append(updatedPeerAddrs, addr)
+	}
+	return updatedPeerAddrs, updatedPeers
 }

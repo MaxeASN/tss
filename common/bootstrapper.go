@@ -57,7 +57,7 @@ func NewBootstrapper(expectedPeers int, config *TssConfig) *Bootstrapper {
 		}
 	}
 
-	fmt.Printf("our bootstrapper info is: moniker: %s, id: %s, listenaddr: %s\n",
+	logger.Infof("our bootstrapper info is: moniker: %s, id: %s, listenaddr: %s\n",
 		config.Moniker,
 		string(config.Id),
 		config.ListenAddr,
@@ -139,7 +139,7 @@ func (b *Bootstrapper) IsFinished() bool {
 	received := b.LenOfPeers()
 	switch b.Cfg.BMode {
 	case KeygenMode:
-		logger.Debugf("received peers: %d, expect peers: %v", received, b.ExpectedPeers)
+		logger.Debugf("received peers: %d, expect peers: %v\n", received, b.ExpectedPeers)
 		return received == b.ExpectedPeers
 	case SignMode:
 		logger.Debugf("received peers: %d, expect peers: %d", received, b.Cfg.Threshold)

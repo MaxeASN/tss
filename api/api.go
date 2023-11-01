@@ -33,7 +33,7 @@ type SignRequest struct{}
 func (s *APIService) Sign(ctx context.Context, chainId int, address string, data string) (any, error) {
 	log.Info("Received Sign request", "chainId", chainId, "address", address, "data", data)
 	// genrerate the task
-	task := &worker.TaskEvent{
+	event := &worker.TaskEvent{
 		Tid:     strconv.Itoa(chainId),
 		ChainId: chainId,
 		Address: address,
@@ -42,7 +42,7 @@ func (s *APIService) Sign(ctx context.Context, chainId int, address string, data
 	}
 
 	// push the task to the queue
-	resultCh, err := s.Worker.PushEvent(task)
+	resultCh, err := s.Worker.PushEvent(event)
 	if err != nil {
 		return nil, NewPushEventError("Push event error")
 	}
@@ -50,7 +50,7 @@ func (s *APIService) Sign(ctx context.Context, chainId int, address string, data
 	for {
 		select {
 		case <-ctx.Done():
-			s.Worker.ReleaseWorker(task.Tid)
+			s.Worker.ReleaseWorker(event.Tid)
 			return nil, NewRequestCanceledError("Request cancelled")
 		case res := <-resultCh:
 			return res.Result, res.Err
