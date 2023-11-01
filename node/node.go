@@ -165,6 +165,7 @@ func getListenAddrs(addr string) string {
 		}
 		fmt.Fprintf(&builder, "%s", addr.String())
 	}
+	hosts.Close()
 	return builder.String()
 }
 
