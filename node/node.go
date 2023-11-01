@@ -23,7 +23,7 @@ type Node struct {
 	TssCfg *common.TssConfig
 	P2pCfg *common.P2PConfig
 
-	bootsraper *common.Bootstrapper
+	bootstrapper *common.Bootstrapper
 }
 
 func New(cfg *common.TssConfig, isBootstraper bool) *Node {
@@ -48,7 +48,7 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 
 	// generate new bootstrapper
 	// notice: bootstrapper is used to find the peers using ssdp service
-	node.bootsraper = common.NewBootstrapper(numOfPeers, cfg)
+	node.bootstrapper = common.NewBootstrapper(numOfPeers, cfg)
 
 	// generate new ssdp protocol listener
 	ssdpListener, err := net.Listen("tcp", src)
@@ -78,7 +78,7 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 				log.Info("ssdp listener accept new connection", "remote", conn.RemoteAddr().String())
 
 				// notice: this will store new peers
-				handleConn(conn, node.bootsraper)
+				handleConn(conn, node.bootstrapper)
 			}
 		}
 	}(ctx)
@@ -112,8 +112,7 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 		}
 		// check peer infos, check if we have the enough connected peers
 		for {
-			log.Info(">>>>>>>>>>>>>>>>>>>>>>>")
-			if node.bootsraper.IsFinished() {
+			if node.bootstrapper.IsFinished() {
 				cancel()
 				done <- true
 				break
@@ -123,12 +122,11 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 		}
 	}()
 
-	log.Info("Waiting here ...")
 	// waiting here
 	<-done
 
-	node.bootsraper.Peers.Range(func(id, value interface{}) bool {
-		log.Info("Running New Peer", "address", value.(common.PeerInfo).RemoteAddr)
+	node.bootstrapper.Peers.Range(func(id, value interface{}) bool {
+		client.Logger.Debugf("Running New Peer", "address", value.(common.PeerInfo).RemoteAddr)
 		return true
 	})
 
@@ -251,8 +249,8 @@ func readBootstrapMessage(conn net.Conn, bootstraper *common.Bootstrapper, l int
 		return
 	}
 
-	if err = bootstraper.HandleBootstrapMsg(peerMsg); err != nil {
 		log.Error("handle bootstrap message error", "err", err)
+	if err = bootstrapper.HandleBootstrapMsg(peerMsg); err != nil {
 	}
 	log.Info("Read bootstrap message successfully", "remote", conn.RemoteAddr().String())
 }
