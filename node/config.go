@@ -20,6 +20,8 @@ type NodeCliConfig struct {
 
 	Parties   int `koanf:"parties"`
 	Threshold int `koanf:"threshold"`
+
+	LogLevel int `koanf:"log_level"`
 }
 
 var DefaultNodeCliConfig = NodeCliConfig{
@@ -32,9 +34,10 @@ var DefaultNodeCliConfig = NodeCliConfig{
 	BMode:      0,
 	Parties:    3,
 	Threshold:  2,
+	LogLevel:   1,
 }
 
-func NodeCliConfigAddOptions(prefix string, f *flag.FlagSet) {
+func CliConfigAddOptions(prefix string, f *flag.FlagSet) {
 	f.String(prefix+".channel_id", DefaultNodeCliConfig.ChannelId, "channel id of p2p connection")
 	f.String(prefix+".channel_pwd", DefaultNodeCliConfig.ChannelPwd, "channel password of p2p connection")
 	f.String(prefix+".ssdp_addr", DefaultNodeCliConfig.SSDPAddr, "ssdp discover address")
@@ -44,9 +47,11 @@ func NodeCliConfigAddOptions(prefix string, f *flag.FlagSet) {
 	f.Int(prefix+".bmode", DefaultNodeCliConfig.BMode, "bit mode of current worker") // todo remove this flag to the worker
 	f.Int(prefix+".parties", DefaultNodeCliConfig.Parties, "total parties")
 	f.Int(prefix+".threshold", DefaultNodeCliConfig.Threshold, "threshold of this party")
+	f.Int(prefix+"log_level", DefaultNodeCliConfig.LogLevel, "set log level of current worker")
 }
 
 func ParseNodeConfig(cfg *NodeCliConfig) {
+
 	common.TssCfg.ChannelId = cfg.ChannelId
 	common.TssCfg.ChannelPassword = cfg.ChannelPwd
 	common.TssCfg.Vault = cfg.Vault
@@ -69,7 +74,7 @@ func ParseNodeConfig(cfg *NodeCliConfig) {
 
 	// set peer id
 	if cfg.PeerId == "" {
-		id, err := common.GetString("Pls input channel id: ", reader)
+		id, err := common.GetString("Pls input Peer id: ", reader)
 		if err != nil {
 			panic(err)
 		}
@@ -80,7 +85,6 @@ func ParseNodeConfig(cfg *NodeCliConfig) {
 
 	// set moniker
 	if cfg.Moniker == "" {
-
 		moniker, err := common.GetString("Pls input moniker: ", reader)
 		if err != nil {
 			panic(err)
@@ -90,4 +94,36 @@ func ParseNodeConfig(cfg *NodeCliConfig) {
 		common.TssCfg.Moniker = cfg.Moniker
 	}
 
+	// set log level
+	common.TssCfg.LogLevel = logLevel(cfg.LogLevel)
+
+	//
+	common.TssCfg.Id = common.TssClientId(cfg.PeerId)
+
+	//
+	common.TssCfg.Home = cfg.Moniker
+
+	tssCfg, err := common.LoadConfig(cfg.Moniker, cfg.Vault, "123456789")
+	if err != nil {
+		panic(err)
+	}
+	common.TssCfg.Home = tssCfg.Home
+	common.TssCfg.ProfileAddr = tssCfg.ProfileAddr
+	common.TssCfg.KDFConfig = tssCfg.KDFConfig
+
+}
+
+func logLevel(level int) string {
+	switch level {
+	case 0:
+		return "debug"
+	case 1:
+		return "info"
+	case 2:
+		return "warn"
+	case 3:
+		return "error"
+	default:
+		return "info"
+	}
 }
