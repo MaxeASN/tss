@@ -12,7 +12,7 @@ import (
 	"github.com/bnb-chain/tss/client"
 	"github.com/bnb-chain/tss/common"
 	tssNode "github.com/bnb-chain/tss/node"
-	"github.com/bnb-chain/tss/worker"
+	"github.com/bnb-chain/tss/task"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ipfs/go-log"
@@ -39,8 +39,14 @@ func mainImpl() int {
 		return 1
 	}
 
+	// parse node config
+	tssNode.ParseNodeConfig(nodeCliConfig)
+
+	// generate preparams for mpc
+	tssNode.GenerateLocalPreParams(nodeCliConfig.Parties, nodeCliConfig.Threshold)
+
 	// new worker with config
-	newWorker := worker.NewWorker(ctx, workerConfig)
+	newWorker := task.NewWorker(ctx, apiConfig.Enable, workerConfig, tssNode.Prepare(ctx), tssNode.NewHandlerFactory())
 	newWorker.Start()
 
 	api := api.NewApiService(apiConfig, newWorker)
@@ -75,12 +81,10 @@ func mainImpl() int {
 		}()
 	}
 
-	//go func() {
 	go func() {
-		tssNode.ParseNodeConfig(nodeCliConfig)
+		//tssNode.ParseNodeConfig(nodeCliConfig)
 		initLogLevel(common.TssCfg)
-
-		node := tssNode.New(&common.TssCfg, true)
+		node := tssNode.New(&common.TssCfg, newWorker, true)
 		node.Start(ctx)
 	}()
 
