@@ -5,15 +5,17 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/bnb-chain/tss/client"
-	"github.com/bnb-chain/tss/ssdp"
+	"github.com/bnb-chain/tss/p2p"
 	"net"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/bgentry/speakeasy"
+	"github.com/bnb-chain/tss/client"
 	"github.com/bnb-chain/tss/common"
+	"github.com/bnb-chain/tss/ssdp"
+	"github.com/bnb-chain/tss/task"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/libp2p/go-libp2p"
 	"github.com/multiformats/go-multiaddr"
@@ -25,12 +27,21 @@ type Node struct {
 	TssCfg *common.TssConfig
 	P2pCfg *common.P2PConfig
 
+	transporter common.Transporter
+
+	localParties *LocalParties
+
+	worker *task.Worker
+
 	bootstrapper *common.Bootstrapper
 }
 
-func New(cfg *common.TssConfig, isBootstraper bool) *Node {
+var localTransporter common.Transporter
+
+func New(cfg *common.TssConfig, worker *task.Worker, isBootstraper bool) *Node {
 	node := &Node{
 		TssCfg: cfg,
+		worker: worker,
 	}
 	// parse the bootstraper listing address
 	src, err := common.ConvertMultiAddrStrToNormalAddr(common.TssCfg.ListenAddr)
@@ -57,13 +68,13 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 	if err != nil {
 		common.Panic(err)
 	}
-	defer func() {
-		err = ssdpListener.Close()
-		if err != nil {
-			common.Panic(err)
-		}
-		client.Logger.Info("closed ssdp listener")
-	}()
+	//defer func() {
+	//	err = ssdpListener.Close()
+	//	if err != nil {
+	//		common.Panic(err)
+	//	}
+	//	client.Logger.Info("closed ssdp listener")
+	//}()
 
 	//done := make(chan bool)
 
@@ -127,6 +138,14 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 	// waiting here
 	<-done
 
+	// close ssdp server for listening
+	err = ssdpListener.Close()
+	if err != nil {
+		common.Panic(err)
+	}
+	client.Logger.Info("closed ssdp listener")
+
+	// log out peer infos
 	node.bootstrapper.Peers.Range(func(id, value interface{}) bool {
 		client.Logger.Debugf("Running New Peer", "address", value.(common.PeerInfo).RemoteAddr)
 		return true
@@ -135,17 +154,43 @@ func New(cfg *common.TssConfig, isBootstraper bool) *Node {
 	// update peer info to the bootstrapper
 	updatePeerInfo(node.bootstrapper)
 
+	// generate signers
+	var signers = make(map[string]int, 0)
+	updateSigners(node.bootstrapper, signers)
+
+	node.transporter = p2p.NewP2PTransporter(
+		node.TssCfg.Home,
+		"",
+		node.TssCfg.Id.String(),
+		nil,
+		nil,
+		nil,
+		signers,
+		&node.TssCfg.P2PConfig,
+	)
+	localTransporter = node.transporter
+
+	// todo: generate new transporter
+	//node.transporter = p2p.NewP2PTransporter(
+	//	node.TssCfg.Home,
+	//	node.TssCfg.Vault,
+	//	node.TssCfg.Id.String(),
+	//	node.bootstrapper,
+	//	nil,
+	//	nil,
+	//)
+
 	return node
 }
 
 func (n *Node) Start(ctx context.Context) {
-	//for {
+	//preParams, _ := keygen.GeneratePreParams(time.Minute * 10)
+	//_ = preParams
+	//var clients []*client.TssClient //for {
 	select {
 	case <-ctx.Done():
 		return
 	default:
-		c := client.NewTssClient(&common.TssCfg, client.KeygenMode, false)
-		c.Start()
 	}
 	//}
 }
@@ -348,4 +393,15 @@ func mergePeerInfo(currentPeerAddrs, currentExpectedPeers, newPeerAddrs, newExpe
 		updatedPeerAddrs = append(updatedPeerAddrs, addr)
 	}
 	return updatedPeerAddrs, updatedPeers
+}
+
+func updateSigners(bootstrapper *common.Bootstrapper, signers map[string]int) {
+	bootstrapper.Peers.Range(func(id, value any) bool {
+
+		if pi, ok := value.(common.PeerInfo); ok {
+			signers[pi.Moniker] = 0
+		}
+
+		return true
+	})
 }

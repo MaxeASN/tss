@@ -15,7 +15,7 @@ func NewPushEventError(message string) *pushEventError {
 }
 
 func (e *pushEventError) Error() string  { return e.msg }
-func (e *pushEventError) ErrorCode() int { return -62300 }
+func (e *pushEventError) ErrorCode() int { return -62301 }
 
 type requestCanceledError struct {
 	msg string
@@ -26,4 +26,4 @@ func NewRequestCanceledError(message string) *requestCanceledError {
 }
 
 func (e *requestCanceledError) Error() string  { return e.msg }
-func (e *requestCanceledError) ErrorCode() int { return -62301 }
+func (e *requestCanceledError) ErrorCode() int { return -62302 }

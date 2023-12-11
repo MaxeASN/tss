@@ -1,4 +1,4 @@
-package worker
+package task
 
 import (
 	flag "github.com/spf13/pflag"

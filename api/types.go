@@ -1,8 +1,8 @@
 package api
 
-import "github.com/bnb-chain/tss/worker"
+import "github.com/bnb-chain/tss/task"
 
 type APIService struct {
 	Config *APIConfig
-	Worker *worker.Worker
+	Worker *task.Worker
 }

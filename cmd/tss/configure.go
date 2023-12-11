@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/bnb-chain/tss/node"
-	"github.com/bnb-chain/tss/worker"
+	"github.com/bnb-chain/tss/task"
 	"github.com/knadh/koanf/providers/posflag"
 
 	"github.com/bnb-chain/tss/api"
@@ -14,11 +14,11 @@ import (
 
 func ConfigAddOptions(f *flag.FlagSet) {
 	api.APIConfigAddOptions("api", f)
-	worker.WorkerConfigAddOptions("worker", f)
-	node.NodeCliConfigAddOptions("node", f)
+	task.WorkerConfigAddOptions("worker", f)
+	node.CliConfigAddOptions("node", f)
 }
 
-func ParseTssConfig(ctx context.Context, args []string) (*api.APIConfig, *worker.WorkerConfig, *node.NodeCliConfig, error) {
+func ParseTssConfig(ctx context.Context, args []string) (*api.APIConfig, *task.WorkerConfig, *node.NodeCliConfig, error) {
 	f := flag.NewFlagSet("", flag.ContinueOnError)
 	ConfigAddOptions(f)
 
@@ -45,7 +45,7 @@ func ParseTssConfig(ctx context.Context, args []string) (*api.APIConfig, *worker
 	}
 
 	// generate worker config
-	workerConfig := &worker.WorkerConfig{
+	workerConfig := &task.WorkerConfig{
 		WorkerLimit: k.Int("worker.limit"),
 	}
 
@@ -60,6 +60,7 @@ func ParseTssConfig(ctx context.Context, args []string) (*api.APIConfig, *worker
 		BMode:      k.Int("node.bmode"),
 		Parties:    k.Int("node.parties"),
 		Threshold:  k.Int("node.threshold"),
+		LogLevel:   k.Int("node.loglevel"),
 	}
 
 	return apiConfig, workerConfig, nodeCliConfig, nil
